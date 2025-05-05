@@ -1,0 +1,20 @@
+SUM(CASE WHEN PROTOCOL = 'ICMP' THEN 1 ELSE 0 END) AS "ICMP Protocol"
+
+
+SELECT MEASURE_START_DATE DIV 30 * 30 AS time,  
+       SUM(CASE WHEN PROTOCOL = 'ICMP' THEN 1 ELSE 0 END) AS "ICMP Protocol" 
+FROM analytics.TELEMETRY_HEADER AS TH  
+WHERE MEASURE_START_DATE BETWEEN 1741910703 AND 1742183177  
+      AND TH.DEVICE_ID = '00:90:0b:8e:93:73'  -- Provide a valid DEVICE_ID  
+      AND (SRC_ETH_ADDRESS IN ('0c:73:eb:90:dc:85')  
+           OR DST_ETH_ADDRESS IN ('ff:ff:ff:ff:ff:ff'))  
+GROUP BY time  
+HAVING time = 1741910730  
+ORDER BY time;
+
+
+
+CALL analytics_spog.GetProtocolGraphDistribution('00_90_0b_8e_93_73', 1741910730, 1741910730, NULL);
+
+
+

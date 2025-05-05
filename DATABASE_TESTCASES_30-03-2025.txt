@@ -1,0 +1,205 @@
+/////////
+
+
+############ANT_633_TCP_DATABASE########################################################
+
+first run the below query then run the spog procedure to validate 
+
+SELECT 
+    SUM(
+        CASE 
+            WHEN PROTOCOL = 'TCP' OR PROTOCOL = 'MODBUS' THEN 1 
+            ELSE 0 
+        END
+    ) AS "TCP Protocol"
+FROM 
+    analytics.TELEMETRY_HEADER AS TH
+LEFT JOIN 
+    analytics.TELEMETRY AS T 
+    ON TH.TELEMETRY_GUID = T.TELEMETRY_GUID 
+    AND T.MEASURE_TYPE = 'ip_proto'
+WHERE 
+    TH.DEVICE_ID = '00:90:0b:8e:93:73'
+    AND MEASURE_START_DATE BETWEEN 1741910703 AND 1742183177
+GROUP BY 
+    MEASURE_START_DATE DIV 30 * 30
+ORDER BY 
+    MEASURE_START_DATE DIV 30 * 30
+LIMIT 1;
+     
+
+
+
+///////////////spog procedureeeee//////////////////////////
+CALL analytics_spog.GetProtocolGraphDistribution('00_90_0b_8e_93_73' , 1741910703, 1741910703, NULL);
+
+
+
+
+
+
+###############################ANT_634_UDP_DATABASE###############################
+
+
+SELECT MEASURE_START_DATE DIV 30 * 30 AS time,  
+       SUM(CASE WHEN PROTOCOL = 'UDP' THEN 1 ELSE 0 END) AS UDP_Protocol  
+FROM analytics.TELEMETRY_HEADER AS TH  
+WHERE MEASURE_START_DATE BETWEEN 1741910703 AND 1742183177  
+      AND TH.DEVICE_ID = '00:90:0b:8e:93:73'  -- Provide a valid DEVICE_ID  
+      AND (SRC_ETH_ADDRESS IN ('0c:73:eb:90:dc:85')  
+           OR DST_ETH_ADDRESS IN ('ff:ff:ff:ff:ff:ff'))  
+GROUP BY time  
+HAVING time = 1741910730  
+ORDER BY time;
+
+
+
+
+/////////////////////////spog procedure//////////////
+
+CALL analytics_spog.GetProtocolGraphDistribution('00_90_0b_8e_93_73', 1741910730, 1741910730, NULL);
+
+
+
+
+
+
+
+############ANT_653_ICMP_DATABASE###########################################
+
+
+SUM(CASE WHEN PROTOCOL = 'ICMP' THEN 1 ELSE 0 END) AS "ICMP Protocol"
+
+
+SELECT MEASURE_START_DATE DIV 30 * 30 AS time,  
+       SUM(CASE WHEN PROTOCOL = 'ICMP' THEN 1 ELSE 0 END) AS "ICMP Protocol" 
+FROM analytics.TELEMETRY_HEADER AS TH  
+WHERE MEASURE_START_DATE BETWEEN 1741910703 AND 1742183177  
+      AND TH.DEVICE_ID = '00:90:0b:8e:93:73'  -- Provide a valid DEVICE_ID  
+      AND (SRC_ETH_ADDRESS IN ('0c:73:eb:90:dc:85')  
+           OR DST_ETH_ADDRESS IN ('ff:ff:ff:ff:ff:ff'))  
+GROUP BY time  
+HAVING time = 1741910730  
+ORDER BY time;
+
+
+///////////////////////////////////////spog procedure//////////////////////////////
+
+CALL analytics_spog.GetProtocolGraphDistribution('00_90_0b_8e_93_73', 1741910730, 1741910730, NULL);
+
+
+
+
+
+
+
+
+
+############ANT_632_BROADCAST_DATABASE###########################################
+
+
+
+
+
+select count(*) as count 
+            FROM analytics.TELEMETRY_HEADER 
+                        as TH
+                        where PROTOCOL = 'ARP'  AND DST_ETH_ADDRESS = 'ff:ff:ff:ff:ff:ff' AND TH.DEVICE_ID = '00:90:0b:8e:93:73'
+                        and     MEASURE_START_DATE BETWEEN  1741910703  AND 1742183177 
+                         
+ 
+    select count(*) as count 
+            FROM analytics.TELEMETRY_HEADER  as TH
+    LEFT JOIN 
+      analytics.TELEMETRY  as ip_proto
+      ON TH.TELEMETRY_GUID = ip_proto.TELEMETRY_GUID 
+      AND ip_proto.MEASURE_TYPE = 'ip_proto'
+    LEFT JOIN 
+      analytics.TELEMETRY  as eth_type
+      ON TH.TELEMETRY_GUID = eth_type.TELEMETRY_GUID 
+      AND eth_type.MEASURE_TYPE = 'eth_type'
+    LEFT JOIN 
+      analytics.ETHER_TYPE et
+      ON eth_type.MEASURE_VALUE = et.ETHER_TYPE
+    WHERE 
+      TH.PROTOCOL = 'IP_NIP' AND TH.DEVICE_ID = '00:90:0b:8e:93:73' AND eth_type.DEVICE_ID = '00:90:0b:8e:93:73' AND ip_proto.DEVICE_ID = '00:90:0b:8e:93:73'
+      AND (
+        (TH.DST_ETH_ADDRESS LIKE 'ff:ff:ff:ff:ff:ff') 
+        OR TH.DST_ADDRESS = '255.255.255.255'
+        OR (SUBSTRING(LPAD(CONV(SUBSTRING_INDEX(TH.DST_ADDRESS, '.', 1),10,2), 8, '0'), 1, 1) = '0' AND SUBSTRING_INDEX(TH.DST_ADDRESS, '.', -3) = '255.255.255') 
+        OR (SUBSTRING(LPAD(CONV(SUBSTRING_INDEX(TH.DST_ADDRESS, '.', 1),10,2), 8, '0'), 1, 2) = '10' AND SUBSTRING_INDEX(TH.DST_ADDRESS, '.', -2) = '255.255' ) 
+        OR (SUBSTRING(LPAD(CONV(SUBSTRING_INDEX(TH.DST_ADDRESS, '.', 1),10,2), 8, '0'), 1, 3) = '110' AND SUBSTRING_INDEX(TH.DST_ADDRESS, '.', -1) = '255')
+      )
+     AND TH.MEASURE_START_DATE BETWEEN 1741910703 AND 1742183177  
+AND (TH.SRC_ETH_ADDRESS IN ('00:0d:8d:aa:09:5f') OR TH.DST_ETH_ADDRESS IN ('ff:ff:ff:ff:ff:ff'))
+AND (et.ETHER_NAME <> 'Unknown' OR et.ETHER_NAME IS NULL);
+
+
+
+                         
+    select count(*) as count from (
+ select *, CONCAT(CEIL((max(MEASURE_END_DATE) over ( partition by PROTOCOL,ip_src_pair,port_src_pair,ip_dst_pair,port_dst_pair,Flow_Indicator) - Time )), 's') as Duration from (   
+      SELECT SRC_ADDRESS as Source_IP, 
+                                DST_ADDRESS as Destination_IP, 
+                Record_Indicator,
+                SUM(Record_Indicator) over ( partition by PROTOCOL,ip_src_pair,port_src_pair,ip_dst_pair,port_dst_pair order by MEASURE_START_DATE) as Flow_Indicator,
+                COALESCE( (CASE 
+                                WHEN PROTOCOL = 'UDP' THEN COALESCE(P2_UDP_SERVICE_NAME, P1_UDP_SERVICE_NAME, 'UDP')
+                ELSE NULL 
+            END), 'Other') AS Service,
+                                CAST(SUBSTRING_INDEX(SRC_PORT, '.', 1) AS UNSIGNED) AS Source_Port,
+            CAST(SUBSTRING_INDEX(DST_PORT, '.', 1) AS UNSIGNED) AS Destination_Port,
+                        SRC_ETH_ADDRESS AS Source_MAC,
+            DST_ETH_ADDRESS AS Destination_MAC,
+            PROTOCOL AS PROTOCOL,
+            MEASURE_START_DATE AS Time,
+            MEASURE_END_DATE,
+                        Previous_Time,
+                        LD,ip_src_pair,port_src_pair,ip_dst_pair,port_dst_pair
+            FROM 
+            (select SRC_ADDRESS, SRC_PORT, DST_ADDRESS, DST_PORT, DST_ETH_ADDRESS,SRC_ETH_ADDRESS, PROTOCOL,P1_UDP_SERVICE_NAME, P2_UDP_SERVICE_NAME, MEASURE_START_DATE,MEASURE_END_DATE,Previous_Time,LD,ip_src_pair,port_src_pair,ip_dst_pair,port_dst_pair,
+                   case
+                when (MEASURE_START_DATE - Previous_Time >  60) then 1                
+                when (LD is null and Previous_Time is null)  then 1 
+                when (Previous_Time is null)  then 1
+                when (LD - MEASURE_START_DATE >  60 ) then 0
+                when (LD is null) then 0
+                else NULL end as Record_Indicator
+            from (select DEVICE_ID,SRC_ADDRESS,SRC_PORT,DST_ADDRESS,DST_PORT,PROTOCOL,MEASURE_START_DATE,MEASURE_END_DATE, DST_ETH_ADDRESS, SRC_ETH_ADDRESS, LEAD(MEASURE_START_DATE) OVER
+            (PARTITION BY PROTOCOL,ip_src_pair,port_src_pair,ip_dst_pair,port_dst_pair order by MEASURE_START_DATE) AS LD,
+                        LAG(MEASURE_START_DATE) OVER
+            (PARTITION BY PROTOCOL,ip_src_pair,port_src_pair,ip_dst_pair,port_dst_pair order by MEASURE_START_DATE ) as Previous_Time  
+                        ,ip_src_pair,port_src_pair,ip_dst_pair,port_dst_pair,P1_UDP_SERVICE_NAME ,P2_UDP_SERVICE_NAME
+                        FROM (SELECT DEVICE_ID, SRC_ADDRESS,SRC_PORT,DST_ADDRESS,DST_PORT,PROTOCOL,MEASURE_START_DATE, MEASURE_END_DATE, DST_ETH_ADDRESS, SRC_ETH_ADDRESS,
+            CASE WHEN (SRC_ADDRESS < DST_ADDRESS) THEN SRC_ADDRESS ELSE DST_ADDRESS END as ip_src_pair ,
+            CASE WHEN (SRC_ADDRESS < DST_ADDRESS) THEN DST_ADDRESS ELSE SRC_ADDRESS END as ip_dst_pair, 
+            CASE WHEN (SRC_ADDRESS < DST_ADDRESS) THEN SRC_PORT ELSE DST_PORT END as port_src_pair ,
+            CASE WHEN (SRC_ADDRESS < DST_ADDRESS) THEN DST_PORT ELSE SRC_PORT END as port_dst_pair,
+                        P1.UDP_SERVICE_NAME as P1_UDP_SERVICE_NAME ,P2.UDP_SERVICE_NAME as P2_UDP_SERVICE_NAME
+            FROM analytics.TELEMETRY_HEADER 
+                        as TH
+                        LEFT JOIN analytics.PORT AS P1 ON
+            P1.PORT_NUMBER = TH.SRC_PORT
+            LEFT JOIN analytics.PORT AS P2 ON
+            P2.PORT_NUMBER = TH.DST_PORT
+                        where PROTOCOL = 'UDP' AND TH.DEVICE_ID = '00:90:0b:8e:93:73' and (DST_ETH_ADDRESS LIKE 'ff:ff:ff:ff:ff:ff') OR
+            DST_ADDRESS = '255.255.255.255' OR 
+              (SUBSTRING(LPAD(CONV(SUBSTRING_INDEX(DST_ADDRESS, '.', 1),10,2), 8, '0'), 1, 1) = '0' AND SUBSTRING_INDEX(DST_ADDRESS, '.', -3) = '255.255.255') OR
+              (SUBSTRING(LPAD(CONV(SUBSTRING_INDEX(DST_ADDRESS, '.', 1),10,2), 8, '0'), 1, 2) = '10' AND SUBSTRING_INDEX(DST_ADDRESS, '.', -2) = '255.255' ) OR 
+              (SUBSTRING(LPAD(CONV(SUBSTRING_INDEX(DST_ADDRESS, '.', 1),10,2), 8, '0'), 1, 3) = '110' AND SUBSTRING_INDEX(DST_ADDRESS, '.', -1) = '255')
+             AND (SRC_ETH_ADDRESS IN ('00:0d:8d:aa:09:5f') OR DST_ETH_ADDRESS IN ('ff:ff:ff:ff:ff:ff') )
+                         AND MEASURE_START_DATE BETWEEN 1741910703  AND 1742183177 )as b) a
+                        ) as data 
+            ) final ) multicast  where Record_Indicator = 1
+                         ;
+
+
+
+
+
+
+
+//////////////////////////SPOG PROCEDURE//////////////////////////////////
+
+CALL `analytics_spog`.`GetTrafficCountBroadcast`('00_90_0b_8e_93_73', 1741910703, 1741910703 , 60, null);
+

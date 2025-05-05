@@ -1,0 +1,27 @@
+SELECT 
+    SUM(
+        CASE 
+            WHEN PROTOCOL = 'TCP' OR PROTOCOL = 'MODBUS' THEN 1 
+            ELSE 0 
+        END
+    ) AS "TCP Protocol"
+FROM 
+    analytics.TELEMETRY_HEADER AS TH
+LEFT JOIN 
+    analytics.TELEMETRY AS T 
+    ON TH.TELEMETRY_GUID = T.TELEMETRY_GUID 
+    AND T.MEASURE_TYPE = 'ip_proto'
+WHERE 
+    TH.DEVICE_ID = '00:90:0b:8e:93:73'
+    AND MEASURE_START_DATE BETWEEN 1741910703 AND 1742183177
+GROUP BY 
+    MEASURE_START_DATE DIV 30 * 30
+ORDER BY 
+    MEASURE_START_DATE DIV 30 * 30
+LIMIT 1;
+     
+
+
+
+spog procedureeeee//////////////////////////
+CALL analytics_spog.GetProtocolGraphDistribution('00_90_0b_8e_93_73' , 1741910703, 1741910703, NULL);

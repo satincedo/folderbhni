@@ -1,0 +1,741 @@
+*** Settings ***
+Library           SSHLibrary
+Library           Collections
+Library           OperatingSystem
+Library           BuiltIn
+Library           Process
+Library           ${CURDIR}/../../../../Python_Utils/Text_Simulator.py
+Variables         ${CURDIR}/../../Test_Data/Text_Variables.py
+Resource          ${CURDIR}/../../../../Global_Keyword/Common_Keywords.robot
+
+*** Test Cases ***
+
+Test Case with Step Validations
+
+
+    [Documentation]    End-to-end validation with individual test step verification.
+
+    SSH Connect    ${REMOTE_IP}    ${SSH_PORT}    ${REMOTE_USERNAME}    ${REMOTE_PASSWORD}
+    Should Not Be Empty    ${REMOTE_IP}    msg= SSH Connection Failed!
+    Log To Console     SSH Connection Established.
+
+
+    ${FILE_NAME}=    Set Variable    ${AN_T146}
+    Should Not Be Empty    ${FILE_NAME}    msg= File name variable not set!
+    Log To Console     File Name: ${FILE_NAME}
+
+    ${FILE_PATH}=    Set Variable    ${LOCAL_TEXT_FILE}\\${FILE_NAME}
+    Should Not Be Empty    ${FILE_PATH}    msg= File path variable not set!
+    Log To Console     Full File Path: ${FILE_PATH}
+
+
+#    ${output}=       Update Current Epoc Time in Anomaly Text File    ${FILE_PATH}
+#    Should Be True    '${output}' != ''    msg= Failed to process text file!
+#    Log To Console     Processed text file.
+
+    ${output}=       Update Current Epoch Time in ICMP Text File    ${FILE_PATH}
+    Should Be True    '${output}' != ''    msg= Failed to process text file!
+    Log To Console     Processed text file.
+
+    ${CONTAINER_ID}    ${ERROR}=    Run Command    docker ps --format "{{.ID}}"
+    Should Be Empty    ${ERROR}    msg= Error executing docker command: ${ERROR}
+    Should Not Be Empty    ${CONTAINER_ID}    msg= No running container found!
+    Log To Console     Container List: ${CONTAINER_ID}
+
+    File Transfer    ${FILE_PATH}    ${REMOTE_DIRECTORY}    ${REMOTE_IP}
+    Should Exist    ${FILE_PATH}    msg= File transfer failed!
+    Log To Console     SFTP File Transfer Successful: ${FILE_PATH} → ${REMOTE_DIRECTORY}
+
+
+    Transfer File To Container    ${REMOTE_DIRECTORY}    ${CONTAINER_DEST_PATH}    ${FILE_NAME}    ${CONTAINER_ID}
+    Log To Console     File transferred to container.
+
+
+    ${anomaly}=    EXTRACT_PROTOCOL_ANOMALY    ${FILE_NAME}
+    Should Not Be Empty    ${anomaly}    msg= Anomaly extraction failed!
+    Log To Console     Extracted anomaly: ${anomaly}
+
+
+    START THE kafka producer    ${KAFKA_PRODUCER_TOPIC}    ${CONTAINER_DEST_PATH}    ${FILE_NAME}    ${CONTAINER_ID}    ${JAVA_PATH}
+    ${consumer_messages}=    Run kafka consumer    ${KAFKA_LOG_PATH}    ${KAFKA_TOPIC}    ${CONTAINER_ID}    ${JAVA_PATH}
+    Should Not Be Empty    ${consumer_messages}    msg= Kafka consumer returned no messages!
+    Log To Console    Kafka Consumer Messages: ${consumer_messages}
+
+
+    ${EXTRACTED_USEFUL_MESSAGES}=    EXTRACT_REQUIRED_MESSAGES    ${consumer_messages}    ${anomaly}
+    Should Not Be Empty    ${EXTRACTED_USEFUL_MESSAGES}    msg= No extracted useful messages!
+   # Log To Console     Extracted Useful Messages: ${EXTRACTED_USEFUL_MESSAGES}
+
+
+    ${Extracted_Messages_MAC_FILE}=    Extract MAC Addresses from File    ${FILE_PATH}
+    ${Extracted_Messages_IP_FILE}=    Extract IP Addresses from File    ${FILE_PATH}
+    ${Extracted_Ports_FILE}=    Extract PORTS from File    ${FILE_PATH}
+
+
+    Should Not Be Empty    ${Extracted_Messages_MAC_FILE}    msg= MAC Extraction Failed!
+    Should Not Be Empty    ${Extracted_Messages_IP_FILE}    msg=IP Extraction Failed!
+    Should Not Be Empty    ${Extracted_Ports_FILE}    msg= Port Extraction Failed!
+
+    Log To Console     Extracted MAC, IP, and Ports from file.
+
+
+
+    ${Extracted_Messages_MAC_consumer}=    Extract MAC Addresses from Consumer    ${EXTRACTED_USEFUL_MESSAGES}
+    ${Extracted_Messages_ip_consumer}=    Extract IP Addresses from Consumer    ${EXTRACTED_USEFUL_MESSAGES}
+    ${Extracted_Messages_port_consumer}=    Extract PORTS from Consumer   ${EXTRACTED_USEFUL_MESSAGES}
+
+    Should Not Be Empty    ${Extracted_Messages_MAC_consumer}    msg= MAC Extraction from Consumer Failed!
+    Should Not Be Empty    ${Extracted_Messages_ip_consumer}    msg= IP Extraction from Consumer Failed!
+    Should Not Be Empty    ${Extracted_Messages_port_consumer}    msg= Port Extraction from Consumer Failed!
+
+    Log To Console     Extracted MAC, IP, and Ports from consumer messages.
+
+
+    ${validation}=    Validate MAC, IP, and Ports    ${Extracted_Messages_IP_FILE}    ${Extracted_Messages_MAC_FILE}    ${Extracted_Ports_FILE}    ${Extracted_Messages_ip_consumer}    ${Extracted_Messages_MAC_consumer}    ${Extracted_Messages_port_consumer}
+
+    Should Be True    ${validation['mac_validation_passed']}    msg= MAC Validation Failed!
+    Should Be True    ${validation['ip_validation_passed']}    msg= IP Validation Failed!
+    Should Be True    ${validation['port_validation_passed']}    msg= Port Validation Failed!
+
+    Log To Console     Validation Successful! MAC, IP, and Ports matched.
+
+
+
+
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+
+import paramiko
+import time
+import os
+import re
+from robot.api.deco import keyword
+import time
+import re
+from subprocess import Popen, PIPE
+import datetime
+from kafka import KafkaProducer
+import subprocess
+
+ssh = paramiko.SSHClient()
+
+
+@keyword("SSH Connect")
+def ssh_connect(remote_ip,port,remote_username,remote_password):
+    global ssh
+    try:
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(remote_ip, port=port, username=remote_username, password=remote_password)
+        if ssh.get_transport() and ssh.get_transport().is_active():
+            print("SSH connection established.")
+            return True
+        else:
+            print("SSH connection failed to establish.")
+            return False
+    except Exception as e:
+        print(f"SSH Connection Error: {str(e)}")
+        return False
+
+@keyword("Update Current Epoc Time in Anomaly Text File ")
+def update_current_epoch_time_in_anomaly_text_file_1(local_file_path):
+
+
+    try:
+        new_epoch_time = int(time.time()) + 180
+
+        with open(local_file_path, 'r+') as file:
+            lines = file.readlines()
+            modified_lines = []
+
+            for line in lines:
+                columns = line.strip().split('|')
+                if columns and '.' in columns[0]:
+                    epoch_parts = columns[0].split('.')
+                    columns[0] = f"{new_epoch_time}.{epoch_parts[1]}"
+                elif columns and columns[0].isdigit():
+                    columns[0] = str(new_epoch_time)
+
+                modified_lines.append("|".join(columns) + '\n')
+
+            file.seek(0)
+            file.writelines(modified_lines)
+            file.truncate()
+
+        print(f"✅ Successfully updated epoch time in: {local_file_path}")
+
+    except Exception as e:
+        print(f"❌ Error processing file {local_file_path}: {e}")
+
+
+@keyword("Update Current Epoch Time in ICMP Text File")
+def update_current_epoch_time_in_anomaly_text_file_2(local_file_path):
+
+
+    try:
+        current_epoch_time = int(time.time())
+
+        with open(local_file_path, 'r+') as file:
+            lines = file.readlines()
+            modified_lines = []
+
+            for index, line in enumerate(lines):
+                columns = line.strip().split('|')
+
+                if columns:
+                    new_epoch = current_epoch_time + 600 if index < len(lines) - 1 else current_epoch_time + 660
+
+                    if '.' in columns[0]:
+                        epoch_parts = columns[0].split('.')
+                        columns[0] = f"{new_epoch}.{epoch_parts[1]}"
+                    elif columns[0].isdigit():
+                        columns[0] = str(new_epoch)
+
+                modified_lines.append("|".join(columns) + '\n')
+
+            file.seek(0)
+            file.writelines(modified_lines)
+            file.truncate()
+
+        print(f"✅ Successfully updated epoch time in: {local_file_path}")
+
+    except Exception as e:
+        print(f"❌ Error processing file {local_file_path}: {e}")
+
+
+
+
+
+@keyword("File Transfer")
+def transfer_file(local_file_path, remote_directory,remote_ip):
+    try:
+        sftp = ssh.open_sftp()
+
+
+        remote_file_path = os.path.join(remote_directory, os.path.basename(local_file_path))
+        print(f"Transferring {local_file_path} to {remote_file_path} on {remote_ip}...")
+        sftp.put(local_file_path, remote_file_path)
+
+
+        stdin, stdout, stderr = ssh.exec_command(f"ls {remote_file_path}")
+        file_list = stdout.read().decode().strip()
+        sftp.close()
+
+        if file_list:
+            print(f"File successfully transferred to {remote_file_path}")
+            return f"File exists: {remote_file_path}"
+        else:
+            print(f"File not found after transfer: {remote_file_path}")
+            return f"File not found: {remote_file_path}"
+    except Exception as e:
+        print(f"Error during file transfer: {e}")
+        return None
+
+
+
+@keyword("Transfer File To Container")
+def transfer_file_to_container(remote_directory, container_dest_path  ,  file_name, container_name):
+
+    if not container_name:
+        print("Docker container ID is not set, cannot proceed with file transfer.")
+        return "Error: Docker container not set"
+
+    command = f"docker cp {remote_directory}{file_name} {container_name}:{container_dest_path}"
+    ssh.exec_command(command)
+    print(f"File '{file_name}' transferred to container at {container_dest_path}")
+
+
+
+@keyword("START THE  kafka producer")
+def run_kafka_producer(kafka_producer_topic, container_dest_path, file_name, container_id, java_path):
+    try:
+
+        kafka_command = (f"export JAVA_HOME={java_path} && export PATH=$JAVA_HOME/bin:$PATH && "
+                         f"/opt/kafka_2.12-3.7.0/bin/kafka-console-producer.sh --broker-list localhost:9093 --topic {kafka_producer_topic} < {container_dest_path}{file_name}")
+
+        stdin, stdout, stderr = ssh.exec_command(f"docker exec {container_id} sh -c '{kafka_command}'")
+        output, error = stdout.read().decode().strip(), stderr.read().decode().strip()
+
+        if error:
+            print(f"Error: {error}")
+
+        return output
+
+    except Exception as e:
+        print(f"Exception: {e}")
+        return None
+
+
+
+
+@keyword("Create Kafka Topic")
+def create_kafka_topic(container_id, topic_name, partitions, replication_factor):
+    try:
+        # Generate a default topic name if not provided
+        if not topic_name:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            topic_name = f"default_topic_{timestamp}"
+            print(f"⚠️ No topic name provided. Using default: {topic_name}")
+
+        # Kafka topic creation command
+        topic_create_cmd = (
+            f"/opt/kafka_2.12-3.7.0/bin/kafka-topics.sh "
+            f"--create --bootstrap-server localhost:9093 "
+            f"--partitions {partitions} --replication-factor {replication_factor} "
+            f"--topic {topic_name}"
+        )
+
+        docker_exec_cmd = f"docker exec {container_id} sh -c '{topic_create_cmd}'"
+        stdin, stdout, stderr = ssh.exec_command(docker_exec_cmd)
+
+        output = stdout.read().decode().strip()
+        error = stderr.read().decode().strip()
+
+        if output:
+            print("✅ Kafka Topic Created:\n", output)
+        if error:
+            print("⚠️ Error Output:\n", error)
+
+        return topic_name if "Created topic" in output or "already exists" in error else None
+
+    except Exception as e:
+        print(f"❌ Exception during topic creation: {e}")
+        return None
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@keyword("RUN KAFKA PRODUCER FROM FILE")
+def run_kafka_producer_from_file(kafka_producer_topic, container_dest_path, file_name, container_id, java_path,
+                                 bootstrap_servers):
+    # Compose full path to the file in container
+    file_path = os.path.join(container_dest_path, file_name)
+
+    # Docker command to copy the file to the container (assuming the file is on the host system)
+    host_file_path = os.path.join(container_dest_path, file_name)
+    copy_command = f"docker cp {host_file_path} {container_id}:{file_path}"
+
+    try:
+        # Copy file into the container
+        subprocess.run(copy_command, shell=True, check=True)
+        print(f"[INFO] File '{file_name}' copied to container '{container_id}'")
+
+        # Kafka CLI command for reference/debug (not executed)
+        kafka_command = (
+            f"export JAVA_HOME={java_path} && export PATH=$JAVA_HOME/bin:$PATH && "
+            f"/opt/kafka_2.12-3.7.0/bin/kafka-console-producer.sh --broker-list localhost:9093 "
+            f"--topic {kafka_producer_topic} < {file_path}"
+        )
+        print(f"[INFO] Kafka CLI Command (reference only):\n{kafka_command}\n")
+
+        producer = KafkaProducer(bootstrap_servers=bootstrap_servers)
+
+        with open(file_path, 'r') as f:
+            for line in f:
+                try:
+                    producer.send(kafka_producer_topic, line.encode())
+                except BufferError:
+                    print("[WARN] Buffer full. Sleeping to let Kafka catch up...")
+                    time.sleep(1)
+                time.sleep(0.001)  # Avoid burst
+
+        producer.flush()
+        print(f"[SUCCESS] File '{file_name}' sent to Kafka topic '{kafka_producer_topic}'")
+
+    except subprocess.CalledProcessError as e:
+        print(f"[ERROR] Failed to copy file to container: {e}")
+    except Exception as e:
+        print(f"[EXCEPTION] Kafka Producer failed: {e}")
+
+
+
+
+
+
+
+
+
+@keyword("run command")
+def run_command(command):
+    time.sleep(5)
+    stdin, stdout, stderr = ssh.exec_command(command)
+    return stdout.read().decode().strip(), stderr.read().decode().strip()
+
+
+
+
+@keyword("Run kafka consumer")
+def run_kafka_consumer(kafka_log_path, kafka_consumer_topic, container_name, java_path):
+    try:
+        if not container_name:
+            print("Docker container name is not set. Exiting consumer function.")
+            return []
+
+        kafka_command = f"/opt/kafka_2.12-3.7.0/bin/kafka-console-consumer.sh --bootstrap-server localhost:9093 --topic {kafka_consumer_topic}"
+        print(f"Starting Kafka consumer inside container {container_name}...\n")
+
+        pid_command = (
+            f"docker exec -e JAVA_HOME={java_path} {container_name} bash -c 'nohup {kafka_command} > {kafka_log_path} 2>&1 & echo $!'"
+        )
+
+        stdin, stdout, stderr = ssh.exec_command(pid_command)
+        time.sleep(4)
+        pid_output, pid_error = stdout.read().decode().strip(), stderr.read().decode().strip()
+
+        if pid_error or not pid_output.strip():
+            print(f"Error fetching consumer PID: {pid_error}")
+            return []
+
+        pid = pid_output.strip()
+        print(f"Kafka consumer started with PID: {pid}")
+
+        kafka_messages = []
+        start_time = time.time()
+        timeout = 60
+
+        while time.time() - start_time < timeout:
+            stdin, stdout, stderr = ssh.exec_command(f"docker exec {container_name} cat {kafka_log_path}")
+            output, error = stdout.read().decode().strip(), stderr.read().decode().strip()
+
+            if error:
+                print(f"Error reading Kafka logs: {error}")
+                break
+
+            for line in output.splitlines():
+                line = line.strip()
+                kafka_messages.append(line)
+                print(f"Received message: {line}")
+
+                if len(kafka_messages) >= 25000:
+                    break
+
+            if len(kafka_messages) >= 25000:
+                break
+
+        if pid:
+            ssh.exec_command(f"docker exec {container_name} bash -c 'kill {pid}'")
+            print(f"Kafka consumer with PID {pid} stopped.")
+
+        print(f"Kafka consumer finished. messages received: {len(kafka_messages)}")
+        return kafka_messages
+    except Exception as e:
+        print(f"Error running Kafka consumer: {e}")
+        return []
+
+
+
+@keyword("EXTRACT_PROTOCOL_ANOMALY")
+def extract_protocol_anomaly(filename):
+
+
+
+    pattern = r'(?:P-)?([A-Za-z0-9]+)[-_]input[-_]?(\d{3})|P-([A-Za-z0-9]+)-(\d{3})'
+
+    match = re.search(pattern, filename, re.IGNORECASE)
+    if match:
+        protocol = match.group(1) or match.group(3)
+        number = match.group(2) or match.group(4)
+        return f"{protocol.upper()}-{number}"
+
+    return "No match found"
+
+
+
+@keyword("EXTRACT_REQUIRED_MESSAGES")
+def extract_and_filter_messages(consumer_messages, protocol_anomaly):
+
+
+    if not protocol_anomaly:
+        print("Invalid protocol anomaly provided.")
+        return []
+
+    pattern = fr'\b{re.escape(protocol_anomaly)}\b'
+    extracted_messages = [message for message in consumer_messages if re.search(pattern, message)]
+
+    return extracted_messages
+
+
+@keyword("Extract MAC Addresses from File")
+def extract_mac_addresses_from_file(local_file_path):
+    mac_regex = r"([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}"
+    with open(local_file_path, 'r') as file:
+        mac_addresses = {match.group() for line in file for match in re.finditer(mac_regex, line)}
+    unique_mac_addresses = list(mac_addresses)
+
+    return unique_mac_addresses
+
+
+@keyword("Extract IP Addresses from File")
+def extract_ip_addresses_from_file(local_file_path):
+    ip_regex = r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+    with open(local_file_path, 'r') as file:
+        ip_addresses = {match.group() for line in file for match in re.finditer(ip_regex, line)}
+    unique_ip_addresses = list(ip_addresses)
+
+    return unique_ip_addresses
+
+@keyword("Extract PORTS from File")
+def extract_unique_ports(file_path):
+
+    unique_ports = set()
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as file:
+            for line in file:
+                columns = line.strip().split("|")
+
+
+                if len(columns) > 28:
+                    src_port = columns[27]
+                    dest_port = columns[28]
+
+                    if src_port.isdigit():
+                        unique_ports.add(int(src_port))
+                    if dest_port.isdigit():
+                        unique_ports.add(int(dest_port))
+
+        return sorted(unique_ports)
+
+    except FileNotFoundError:
+        print(f"Error: File '{file_path}' not found.")
+        return []
+    except Exception as e:
+        print(f"Error reading file: {e}")
+        return []
+
+
+@keyword("Extract MAC Addresses from Consumer")
+def extract_mac_addresses_from_consumer(consumer_messages):
+    mac_regex = r"([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}"
+    unique_macs = set()
+
+    for message in consumer_messages:
+        mac_addresses = [match.group() for match in re.finditer(mac_regex, message)]
+
+        if len(mac_addresses) > 1:
+            unique_macs.update(mac_addresses[1:])
+
+    unique_macs_list = list(unique_macs)
+    print(f"Extracted Unique MAC addresses (excluding first from each message): {unique_macs_list}")
+
+    return unique_macs_list
+
+
+@keyword("Extract IP Addresses from Consumer")
+def extract_ip_addresses_from_consumer(consumer_messages):
+    ip_regex = r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+
+
+    if isinstance(consumer_messages, str):
+        consumer_messages = [consumer_messages]
+
+    ip_addresses = set()
+
+    for message in consumer_messages:
+        matches = re.findall(ip_regex, message)
+        ip_addresses.update(matches)
+
+    unique_ips = list(ip_addresses)
+    print(f"Extracted Unique IP addresses from consumer messages: {unique_ips}")
+
+    return unique_ips
+
+@keyword("Extract PORTS from Consumer")
+def extract_ports_from_consumer(messages):
+
+    try:
+        if not messages or not isinstance(messages, list):
+            print("Message list is empty or not valid.")
+            return []
+
+        first_message = messages[0]
+        parts = first_message.split('|')
+
+        if len(parts) > 9:
+            src_port = parts[6].strip()
+            dest_port = parts[9].strip()
+            return [src_port, dest_port]
+        else:
+            print("Invalid message format, not enough fields.")
+            return []
+    except Exception as e:
+        print(f"Error extracting ports: {e}")
+        return []
+
+
+@keyword("Validate MAC, IP, and Ports")
+def validate_mac_ip_ports(ip_from_file, mac_from_file, ports_from_file,
+                          ip_from_consumer, mac_from_consumer, ports_from_consumer):
+
+    # MAC validation: at least one match
+    mac_valid = any(mac in mac_from_consumer for mac in mac_from_file)
+
+    # IP validation: at least one match
+    ip_valid = any(ip in ip_from_consumer for ip in ip_from_file)
+
+    # Port validation: at least one match (convert to str for consistency)
+    port_valid = any(str(port) in map(str, ports_from_consumer) for port in ports_from_file)
+
+    # Output validation results
+    if mac_valid:
+        print(" At least one MAC address from the file is found in consumer messages.")
+    else:
+        print(" No MAC addresses from the file were found in consumer messages.")
+
+    if ip_valid:
+        print(" At least one matching IP found.")
+    else:
+        print(" No matching IPs found.")
+
+    if port_valid:
+        print(" At least one matching port found.")
+    else:
+        print(" No matching ports found.")
+
+    if mac_valid and ip_valid and port_valid:
+        print(" Validation successful! At least one MAC, IP, and Port matched.")
+
+    return {
+        "mac_validation_passed": mac_valid,
+        "ip_validation_passed": ip_valid,
+        "port_validation_passed": port_valid
+    }
+
+# def validate_mac_ip_ports(ip_from_file, mac_from_file, ports_from_file,
+#                           ip_from_consumer, mac_from_consumer, ports_from_consumer):
+#
+#     mac_valid = all(mac in mac_from_consumer for mac in mac_from_file)
+#
+#
+#     file_ip_set = set(ip_from_file)
+#     consumer_ip_set = set(ip_from_consumer)
+#     ip_valid = bool(file_ip_set & consumer_ip_set)
+#
+#
+#     file_ports_set = set(map(str, ports_from_file))
+#     consumer_ports_set = set(map(str, ports_from_consumer))
+#     missing_ports = consumer_ports_set - file_ports_set
+#     port_valid = not missing_ports
+#
+#
+#     if mac_valid:
+#         print(" Both MAC addresses from the file are found in consumer messages.")
+#     else:
+#         print(" One or both MAC addresses from the file are missing in consumer messages.")
+#
+#     if ip_valid:
+#         print(" Validation Passed! All consumer IPs match file IPs.")
+#     else:
+#         print(f" Validation Failed! Missing IPs from file: {missing_ips}")
+#
+#     if port_valid:
+#         print(" Validation Passed! All consumer ports match file ports.")
+#     else:
+#         print(f" Validation Failed! Missing Ports from file: {missing_ports}")
+#
+#
+#     if mac_valid and ip_valid and port_valid:
+#         print(" Validation successful! All MAC, IP, and Ports are matched.")
+#
+#
+#     return {
+#         "mac_validation_passed": mac_valid,
+#         "ip_validation_passed": ip_valid,
+#         "port_validation_passed": port_valid
+#     }
+#
+#
+#
+
+
+
+
+
+
+
+
+
+
+
+///////////////////////
+DOCKER_COMMAND_CHECK_FILE = 'sh -c "if [ -f /opt/kafka_2.12-3.7.0/bin/text_files_output_1/]; then echo \"File exists\"; else echo \"File does not exist\"; fi"'
+KAFKA_PRODUCER_TOPIC = "Input_Master_Data"
+KAFKA_TOPIC = "Protocol_Anomaly"
+CONTAINER_DEST_PATH = "/opt/kafka_2.12-3.7.0/bin/text_files2/"
+REMOTE_DIRECTORY = "/root_1/text_files_output/"
+REMOTE_IP = "10.20.254.73"
+REMOTE_USERNAME = "root"
+REMOTE_PASSWORD = "Tfo50rp2o22"
+SSH_PORT = "2222"
+num_packets = "10"
+timeout = "60"
+
+
+PARTITIONS = 4
+REPLICATION_FACTOR = 1
+
+
+JAVA_PATH = "/opt/openlogic-openjdk-8u342-b07-linux-x64/"
+KAFKA_LOG_PATH = "/tmp/kafka_output_6.log"
+KAFKA_LOG_PATH_pcap = "/tmp/kafka_output_112.log"
+LOCAL_TEXT_FILE = r"C:\Users\satvik.proach\Desktop\BHNI_Automation_NEW\bhni_automation_framework 3\bhni_automation_framework\Tests\BHNI\Test_Data\Text_Files"
+BOOTSTRAP_SERVERS = "localhost:9093"
+GROUP_ID = "default_group"
+AN_T142 = "P-TCP-006.txt"
+AN_T146 = "P-TCP-009.txt"
+AN_T215 = "P-ICMP-007.txt"
+AN_T207 = "P-MODBUS-003.txt"
+AN_T210 = "P-SMB1-001.txt"
+TARGET_IP = "10.20.254.73"
+FTP_FILE = "P-FTP-001.txt"
+new_icmp_file = "P-ICMP-004.txt"
+icmp = "P-ICMP-011.txt"
+test = "P-ICMP-009.txt"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

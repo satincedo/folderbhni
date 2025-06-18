@@ -1,0 +1,77 @@
+*** Settings ***
+Library           SSHLibrary
+Library           Collections
+Library           OperatingSystem
+Library           BuiltIn
+Library           Process
+#Library           ${CURDIR}/../../../../Python_Utils/Text_Simulator2.py
+Library        ${CURDIR}/../../../../Python_Utils/Text_Simulator.py
+Variables      ${CURDIR}/../../Test_Data/Text_Variables.py
+Resource       ${CURDIR}/../../../../Global_Keyword/Common_Keywords.robot
+
+
+
+*** Test Cases ***
+Validate Text Against Kafka
+    [Documentation]    Reads a text file, replays it, and validates Kafka consumer output.
+    ...                Validates the Kafka message output against the extracted text data.
+    ...                Test Case: T154
+    ...                Creator :: nara (nara.bhagyarekha@incedoinc.com)
+    [Tags]    TC154
+
+
+    ${FILE_NAME}=    Set Variable    ${AN_T154}
+    Log    variable set
+    Log To Console    "Full File Path: ${FILE_NAME}"
+
+    ${FILE_PATH}=    Set Variable    ${LOCAL_TEXT_FILE}${FILE_NAME}
+    Log To Console    "Full File Path: ${FILE_PATH}"
+
+    ${output}=    Update Current Epoc Time in Anomaly Text File    ${FILE_PATH}
+    Log To Console    "Processed text file"
+
+    SSH Connect    ${REMOTE_IP}    ${SSH_PORT}    ${REMOTE_USERNAME}    ${REMOTE_PASSWORD}
+    Log To Console    "SSH Connection Established"
+
+    ${CONTAINER_ID}    ${ERROR}=    run command    docker ps --format "{{.ID}}"
+    Log To Console    "Container List: ${CONTAINER_ID}"
+    Should Be Empty    ${ERROR}    msg=Error executing command: ${ERROR}
+
+    ${CONTAINER_ID}    ${ERROR}=    run command    sudo docker ps -aqf "name=${CONTAINER_NAME}"
+    Log To Console    "Filtered Container ID: ${CONTAINER_ID}"
+    Should Be Empty    ${ERROR}    msg=Error executing command: ${ERROR}
+
+
+    File Transfer       ${FILE_PATH}    ${REMOTE_DIRECTORY}     ${REMOTE_IP}
+    Log To Console    "SFTP File Transfer Successful: ${LOCAL_TEXT_FILE}${FILE_NAME} → ${REMOTE_DIRECTORY}"
+
+    Transfer File To Container  ${REMOTE_DIRECTORY}      ${CONTAINER_DEST_PATH}      ${FILE_NAME}     ${CONTAINER_ID}
+
+    ${output}=    Execute Command    docker cp ${REMOTE_DIRECTORY}/${FILENAME} ${CONTAINER_ID}:${CONTAINER_DEST_PATH}    sudo=True
+    Log To Console    "Successfully transferred file to container at: ${CONTAINER_DEST_PATH}"
+
+    ${kafka_producer}=    run kafka producer     ${KAFKA_PRODUCER_TOPIC}    ${CONTAINER_DEST_PATH}    ${CONTAINER_ID}    ${FILENAME}
+
+    ${kafka_consumer}=    Run kafka consumer   ${KAFKA_LOG_PATH}  ${KAFKA_TOPIC}   ${CONTAINER_ID}   ${JAVA_PATH}
+    Log To Console    ${kafka_consumer}
+    
+    ${Anomaly}=    EXTRACT_PROTOCOL_ANOMALY    ${FILE_PATH}
+    Log To Console    ${Anomaly}    
+    
+    ${Anomaly_consumer}=    EXTRACT_VALUES    ${kafka_consumer}    ${FILE_PATH}    ${Anomaly}
+    Log To Console    ${Anomaly_consumer} 
+    
+    ${Extracted_Messages_MAC_file}=    Extract MAC Addresses from File    ${FILE_PATH}
+    Log To Console    ${Extracted_Messages_MAC_file}
+
+    ${Extracted_Messages_ip_file}=    Extract IP Addresses from File    ${FILE_PATH}
+    Log            ${Extracted_Messages_MAC_file}
+
+    ${Extracted_Messages_MAC_consumer}=    Extract MAC Addresses from Consumer    ${kafka_consumer}
+    Log         ${Extracted_Messages_MAC_consumer}
+
+    ${Extracted_Messages_ip_consumer}=    Extract IP Addresses from Consumer    ${kafka_consumer}
+    Log        ${Extracted_Messages_ip_consumer}
+
+    ${validation}=         Validate MAC and IP Addresses    ${Extracted_Messages_ip_file}  ${Extracted_Messages_MAC_file}    ${Extracted_Messages_ip_consumer}  ${Extracted_Messages_MAC_consumer}
+    Log                validation done
